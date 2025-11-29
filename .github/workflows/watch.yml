@@ -1,0 +1,32 @@
+姓名: 监视回购更新
+
+在……之上:
+计划表:
+    - 克朗: "*/5 * * * *"
+workflow_dispatch:
+
+工作:
+检查:
+run-on: ubuntu-最新
+步骤:
+      - 姓名: 检查回购更新
+跑: |
+所有者="吸血鬼云"
+回购="hanikorekhar"
+last_FILE="last.txt"
+          
+latest=$(curl-s https://api.github.com/repos/$OWNER/$REPO/commits/main|jq-r'.[0].sha')
+          
+如果[！-f$LAST_FILE]；则
+echo$LATEST>$LAST_FILE
+退出0
+Fi
+          
+old=$(cat$LAST_FILE)
+          
+如果["$LATEST"！="$Old"]；则
+echo$LATEST>$LAST_FILE
+curl-s-X POST"https://api.telegram.org/bot${{secrets.BOT_TOKEN}}/sendMessage"\
+-h"内容类型：应用程序/JSON"\
+-d"{\"chat_id\"：\"${{secrets.CHAT_ID}}\"，\"文本\"：\"🚨 仓库更新：https://github.com/$OWNER/$REPO\"}"
+Fi
