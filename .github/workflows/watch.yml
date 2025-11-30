@@ -3,7 +3,7 @@ name: Monitor Hanikorekhar Repository
 on:
   schedule:
     - cron: "*/5 * * * *"   # 每5分钟检查一次
-workflow_dispatch：# 支持手动触发
+  workflow_dispatch:         # 手动触发
 
 jobs:
   check:
@@ -11,49 +11,49 @@ jobs:
     steps:
       - name: Install jq
         run: |
-sudo apt-get更新
-sudo apt-get install-y jq
+          sudo apt-get update
+          sudo apt-get install -y jq
 
       - name: Check repository updates
         run: |
-owner="vampycloudia"
-repo="hanikorekhar"
-last_FILE="last.txt"
+          OWNER="vampycloudia"
+          REPO="hanikorekhar"
+          LAST_FILE="last.txt"
 
           # 获取最新提交文件列表
-files=$(curl-s https://api.github.com/repos/$OWNER/$REPO/commits/main\
-|jq-r'.[0].files[].filename')
+          FILES=$(curl -s https://api.github.com/repos/$OWNER/$REPO/commits/main \
+            | jq -r '.[0].files[].filename')
 
           # 第一次运行，保存文件列表并退出
-如果[！-f$LAST_FILE]；则
-echo"$FILES">$LAST_FILE
-退出0
-Fi
+          if [ ! -f $LAST_FILE ]; then
+            echo "$FILES" > $LAST_FILE
+            exit 0
+          fi
 
           # 读取上次保存的文件列表
-old=$(cat$LAST_FILE)
+          OLD=$(cat $LAST_FILE)
 
           # 找出更新文件
-updated_FILES=$(comm-13<(echo"$OLD"|sort)<(echo"$FILES"|sort)||true)
+          UPDATED_FILES=$(comm -13 <(echo "$OLD" | sort) <(echo "$FILES" | sort) || true)
 
-如果[！-z"$UPDATED_FILES"]；则
-echo"$FILES">$LAST_FILE
+          if [ ! -z "$UPDATED_FILES" ]; then
+            echo "$FILES" > $LAST_FILE
 
             # 循环更新文件发送 Telegram 提醒
-对于$UPDATED_FILES；中的文件，请执行
-如果["$file"="IllI.exe"]；则
-message="🚨 仿真加载器已更新：https://github.com/$OWNER/$REPO"
-Elif["$file"="libvampy64.so"]；然后
-message="🚨 Direct云已更新：https://github.com/$OWNER/$REPO"
-Elif["$file"="libvampybeta64.so"]；然后
-消息=🚨 贝塔"版本已更新：https://github.com/$OWNER/$REPO"
-其他
-message="🚨 存储库已更新：$file"
-Fi
+            for file in $UPDATED_FILES; do
+              if [ "$file" = "IllI.exe" ]; then
+                MESSAGE="🚨 Emulator Loader updated: https://github.com/$OWNER/$REPO"
+              elif [ "$file" = "libvampy64.so" ]; then
+                MESSAGE="🚨 Direct Cloud updated: https://github.com/$OWNER/$REPO"
+              elif [ "$file" = "libvampybeta64.so" ]; then
+                MESSAGE="🚨 Beta version updated: https://github.com/$OWNER/$REPO"
+              else
+                MESSAGE="🚨 Repository updated: $file"
+              fi
 
               # 发送 Telegram 消息
-curl-s-X POST"https://api.telegram.org/bot${{secrets.BOT_TOKEN}}/sendMessage"\
--h"内容类型：应用程序/json"\
--d"{\"chat_id\"：\"${{secrets.CHAT_ID}}\"，\"text\"：\"$MESSAGE\"}"
-已完成
-Fi
+              curl -s -X POST "https://api.telegram.org/bot${{ secrets.BOT_TOKEN }}/sendMessage" \
+                -H "Content-Type: application/json" \
+                -d "{\"chat_id\": \"${{ secrets.CHAT_ID }}\", \"text\": \"$MESSAGE\"}"
+            done
+          fi
