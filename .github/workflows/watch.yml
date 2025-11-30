@@ -19,7 +19,6 @@ jobs:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
-          # 调试信息：检查环境变量是否设置
           echo "BOT_TOKEN 长度: ${#BOT_TOKEN}"
           echo "CHAT_ID: $CHAT_ID"
           
@@ -35,12 +34,13 @@ jobs:
           
           echo "最新提交SHA: $COMMIT_SHA"
           
+          # 获取提交的文件列表
+          FILES=$(echo "$LATEST_COMMIT" | jq -r '.files[].filename' | tr '\n' ' ' || echo "")
+          echo "文件列表: $FILES"
+
           # 获取 SrcVersion.ini 文件内容
           VERSION_FILE_URL="https://raw.githubusercontent.com/$OWNER/$REPO/main/SrcVersion.ini"
           VERSION_CONTENT=$(curl -s "$VERSION_FILE_URL" || echo "")
-          
-          echo "版本文件内容:"
-          echo "$VERSION_CONTENT"
           
           # 解析版本信息
           STABLE_VERSION=$(echo "$VERSION_CONTENT" | grep "stable_channel" | cut -d'=' -f2 | tr -d ' ' || echo "")
@@ -59,7 +59,7 @@ jobs:
             # 发送启动消息
             curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
               -H "Content-Type: application/json" \
-              -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"🔧 版本监控服务已启动！\\n仓库: $OWNER/$REPO\\n当前稳定版本: $STABLE_VERSION\\n当前测试版本: $BETA_VERSION\"}"
+              -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"🔧 完整监控服务已启动！\\n仓库: $OWNER/$REPO\\n当前稳定版本: $STABLE_VERSION\\n当前测试版本: $BETA_VERSION\\n\\n将监控：\\n- 文件更新 (.so/.exe)\\n- 版本变化 (SrcVersion.ini)\"}"
             exit 0
           fi
 
@@ -76,19 +76,43 @@ jobs:
           # 初始化消息变量
           MESSAGE=""
           HAS_UPDATE=false
+          FILE_UPDATES=""
+          VERSION_CHANGES=""
 
-          # 比较提交SHA
+          # 比较提交SHA - 检测文件更新
           if [ "$COMMIT_SHA" != "$LAST_SHA" ]; then
             echo "🚨 检测到新提交: $LAST_SHA -> $COMMIT_SHA"
             HAS_UPDATE=true
-            
-            # 保存新状态
-            echo "$COMMIT_SHA" > "$LAST_COMMIT_FILE"
             
             # 添加基本更新信息
             MESSAGE="📢 仓库已更新！\n\n"
             MESSAGE+="提交: $COMMIT_SHA\n"
             MESSAGE+="链接: $COMMIT_URL\n\n"
+            
+            # 检查特定文件更新
+            for file in $FILES; do
+              case "$file" in
+                "IllI.exe")
+                  FILE_UPDATES+="🚨 模拟器加载器已更新\n"
+                  ;;
+                "libvampy64.so")
+                  FILE_UPDATES+="🚨 直装云已更新\n"
+                  ;;
+                "libvampybeta64.so")
+                  FILE_UPDATES+="🚨 测试版已更新\n"
+                  ;;
+                "SrcVersion.ini")
+                  # 版本文件更新会在版本比较中处理
+                  FILE_UPDATES+="📝 版本配置文件已更新\n"
+                  ;;
+                *)
+                  FILE_UPDATES+="📝 其他文件: $file\n"
+                  ;;
+              esac
+            done
+            
+            # 保存新提交状态
+            echo "$COMMIT_SHA" > "$LAST_COMMIT_FILE"
           fi
 
           # 比较版本信息
@@ -96,30 +120,22 @@ jobs:
             echo "🚨 稳定版本更新: $LAST_STABLE -> $STABLE_VERSION"
             HAS_UPDATE=true
             
-            if [ -z "$MESSAGE" ]; then
-              MESSAGE="📢 版本更新通知！\n\n"
-            fi
-            
-            MESSAGE+="✅ 稳定通道更新: $STABLE_VERSION\n"
+            VERSION_CHANGES+="✅ 稳定通道更新: $STABLE_VERSION\n"
             if [ -n "$LAST_STABLE" ]; then
-              MESSAGE+="之前版本: $LAST_STABLE\n"
+              VERSION_CHANGES+="之前版本: $LAST_STABLE\n"
             fi
-            MESSAGE+="\n"
+            VERSION_CHANGES+="\n"
           fi
 
           if [ "$BETA_VERSION" != "$LAST_BETA" ] && [ -n "$BETA_VERSION" ]; then
             echo "🚨 测试版本更新: $LAST_BETA -> $BETA_VERSION"
             HAS_UPDATE=true
             
-            if [ -z "$MESSAGE" ]; then
-              MESSAGE="📢 版本更新通知！\n\n"
-            fi
-            
-            MESSAGE+="🧪 测试通道更新: $BETA_VERSION\n"
+            VERSION_CHANGES+="🧪 测试通道更新: $BETA_VERSION\n"
             if [ -n "$LAST_BETA" ]; then
-              MESSAGE+="之前版本: $LAST_BETA\n"
+              VERSION_CHANGES+="之前版本: $LAST_BETA\n"
             fi
-            MESSAGE+="\n"
+            VERSION_CHANGES+="\n"
           fi
 
           # 如果有更新，发送消息并保存新版本信息
@@ -127,11 +143,13 @@ jobs:
             # 保存新版本信息
             echo "$STABLE_VERSION|$BETA_VERSION" > "$LAST_VERSION_FILE"
             
-            # 如果没有具体的版本更新信息，添加通用消息
-            if [ -z "$MESSAGE" ]; then
-              MESSAGE="📢 检测到仓库更新，但版本文件无变化\n"
-              MESSAGE+="提交: $COMMIT_SHA\n"
-              MESSAGE+="链接: $COMMIT_URL"
+            # 组合消息
+            if [ -n "$VERSION_CHANGES" ]; then
+              MESSAGE+="🔄 版本更新:\n$VERSION_CHANGES"
+            fi
+            
+            if [ -n "$FILE_UPDATES" ]; then
+              MESSAGE+="📁 文件更新:\n$FILE_UPDATES"
             fi
 
             echo "发送消息: $MESSAGE"
