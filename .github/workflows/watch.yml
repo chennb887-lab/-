@@ -2,15 +2,12 @@ name: Monitor Hanikorekhar Repository
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # 每5分钟检查一次
-  workflow_dispatch:         # 手动触发
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
 
 jobs:
   check:
     runs-on: ubuntu-latest
-    env:
-      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-      CHAT_ID: ${{ secrets.CAT_ID }}
     steps:
       - name: 安装必要工具
         run: |
@@ -18,7 +15,14 @@ jobs:
           sudo apt-get install -y jq curl
 
       - name: 检查仓库更新
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}  # 确保这里与你的Secret名称一致
         run: |
+          # 调试信息：检查环境变量是否设置
+          echo "BOT_TOKEN 长度: ${#BOT_TOKEN}"
+          echo "CHAT_ID: $CHAT_ID"
+          
           OWNER="vampycloudia"
           REPO="hanikorekhar"
           LAST_FILE="last_commit.txt"
@@ -28,74 +32,70 @@ jobs:
           COMMIT_SHA=$(echo "$LATEST_COMMIT" | jq -r '.sha' | cut -c1-7)
           COMMIT_URL=$(echo "$LATEST_COMMIT" | jq -r '.html_url')
           
-          # 获取提交的文件列表
-          FILES=$(echo "$LATEST_COMMIT" | jq -r '.files[].filename' | tr '\n' '|')
+          echo "最新提交SHA: $COMMIT_SHA"
           
-          echo "最新提交: $COMMIT_SHA"
+          # 获取提交的文件列表
+          FILES_JSON=$(curl -s "https://api.github.com/repos/$OWNER/$REPO/commits/main")
+          FILES=$(echo "$FILES_JSON" | jq -r '.files[].filename' | tr '\n' ' ' || echo "")
+          
           echo "文件列表: $FILES"
 
-          # 检查是否是第一次运行或手动触发
-          if [ ! -f "$LAST_FILE" ] || [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            echo "第一次运行或手动触发，保存当前状态"
-            echo "$COMMIT_SHA|$FILES" > "$LAST_FILE"
-            echo "✅ 已保存初始状态，下次更新时会通知"
+          # 检查是否是第一次运行
+          if [ ! -f "$LAST_FILE" ]; then
+            echo "第一次运行，保存当前状态"
+            echo "$COMMIT_SHA" > "$LAST_FILE"
+            echo "✅ 初始状态已保存"
+            
+            # 发送测试消息确认配置正确
+            curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+              -H "Content-Type: application/json" \
+              -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"🔧 监控服务已启动！\\n仓库: $OWNER/$REPO\\n将监控以下文件更新:\\n- IllI.exe\\n- libvampy64.so\\n- libvampybeta64.so\"}"
             exit 0
           fi
 
-          # 读取上次保存的状态
-          LAST_DATA=$(cat "$LAST_FILE")
-          LAST_SHA=$(echo "$LAST_DATA" | cut -d'|' -f1)
-          LAST_FILES=$(echo "$LAST_DATA" | cut -d'|' -f2)
-          
-          echo "上次提交: $LAST_SHA"
-          echo "上次文件: $LAST_FILES"
+          # 读取上次保存的提交SHA
+          LAST_SHA=$(cat "$LAST_FILE")
+          echo "上次提交SHA: $LAST_SHA"
 
           # 比较提交SHA
           if [ "$COMMIT_SHA" != "$LAST_SHA" ]; then
             echo "🚨 检测到新提交: $LAST_SHA -> $COMMIT_SHA"
             
             # 保存新状态
-            echo "$COMMIT_SHA|$FILES" > "$LAST_FILE"
+            echo "$COMMIT_SHA" > "$LAST_FILE"
             
-            # 检查特定文件更新
-            UPDATED_MESSAGE="📢 仓库已更新!\n\n"
-            UPDATED_MESSAGE+="提交: $COMMIT_SHA\n"
-            UPDATED_MESSAGE+="链接: $COMMIT_URL\n\n"
+            # 构建更新消息
+            MESSAGE="📢 仓库已更新！\n\n"
+            MESSAGE+="提交: $COMMIT_SHA\n"
+            MESSAGE+="链接: $COMMIT_URL\n\n"
+            MESSAGE+="更新的文件:\n"
             
-            # 转换为数组检查文件
-            IFS='|' read -ra CURRENT_FILE_ARRAY <<< "$FILES"
-            IFS='|' read -ra LAST_FILE_ARRAY <<< "$LAST_FILES"
-            
-            HAS_SPECIAL_UPDATE=false
-            
-            for file in "${CURRENT_FILE_ARRAY[@]}"; do
-              if [[ " ${LAST_FILE_ARRAY[@]} " != *" $file "* ]]; then
-                case "$file" in
-                  "IllI.exe")
-                    UPDATED_MESSAGE+="🚨 模拟器加载器已更新\n"
-                    HAS_SPECIAL_UPDATE=true
-                    ;;
-                  "libvampy64.so")
-                    UPDATED_MESSAGE+="🚨 直装云已更新\n"
-                    HAS_SPECIAL_UPDATE=true
-                    ;;
-                  "libvampybeta64.so")
-                    UPDATED_MESSAGE+="🚨 测试版已更新\n"
-                    HAS_SPECIAL_UPDATE=true
-                    ;;
-                esac
-              fi
+            # 检查特定文件
+            for file in $FILES; do
+              case "$file" in
+                "IllI.exe")
+                  MESSAGE+="🚨 模拟器加载器已更新: $file\n"
+                  ;;
+                "libvampy64.so")
+                  MESSAGE+="🚨 直装云已更新: $file\n"
+                  ;;
+                "libvampybeta64.so")
+                  MESSAGE+="🚨 测试版已更新: $file\n"
+                  ;;
+                *)
+                  MESSAGE+="📝 $file\n"
+                  ;;
+              esac
             done
-            
-            if [ "$HAS_SPECIAL_UPDATE" = false ]; then
-              UPDATED_MESSAGE+="📝 其他文件已更新"
-            fi
+
+            echo "发送消息: $MESSAGE"
             
             # 发送 Telegram 消息
-            echo "发送消息: $UPDATED_MESSAGE"
-            curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+            RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
               -H "Content-Type: application/json" \
-              -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"$UPDATED_MESSAGE\", \"parse_mode\": \"HTML\"}"
+              -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"$MESSAGE\", \"parse_mode\": \"Markdown\"}")
+            
+            echo "Telegram API 响应: $RESPONSE"
             
           else
             echo "✅ 没有检测到更新"
