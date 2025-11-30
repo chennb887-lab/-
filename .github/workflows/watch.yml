@@ -26,18 +26,17 @@ jobs:
           # 获取最新提交文件列表
           FILES=$(curl -s https://api.github.com/repos/$OWNER/$REPO/commits/main | jq -r '.[0].files[].filename' || echo "")
 
-          # 第一次运行，保存文件列表并退出
+          # 第一次运行，如果 last.txt 不存在，将所有文件当作更新
           if [ ! -f $LAST_FILE ]; then
             echo "$FILES" > $LAST_FILE
-            exit 0
+            UPDATED_FILES="$FILES"
+          else
+            # 读取上次保存的文件列表
+            OLD=$(cat $LAST_FILE)
+            UPDATED_FILES=$(comm -13 <(echo "$OLD" | sort) <(echo "$FILES" | sort))
           fi
 
-          # 读取上次保存的文件列表
-          OLD=$(cat $LAST_FILE)
-
-          # 找出更新文件
-          UPDATED_FILES=$(comm -13 <(echo "$OLD" | sort) <(echo "$FILES" | sort))
-
+          # 如果有更新文件，发送通知
           if [ ! -z "$UPDATED_FILES" ]; then
             echo "$FILES" > $LAST_FILE
 
