@@ -32,13 +32,14 @@ jobs:
           COMMIT_SHA=$(echo "$LATEST_COMMIT" | jq -r '.sha')
           COMMIT_SHA_SHORT=$(echo "$COMMIT_SHA" | cut -c1-7)
           COMMIT_URL="https://github.com/$OWNER/$REPO/commit/$COMMIT_SHA"
-          REPO_URL="https://github.com/$OWNER/$REPO"
+          REPO_URL="https://github.com/$OWNER/$REPO/tree/main"
           
           echo "最新提交SHA: $COMMIT_SHA"
           echo "提交链接: $COMMIT_URL"
           
-          # 获取提交的文件列表
-          FILES=$(echo "$LATEST_COMMIT" | jq -r '.files[].filename' | tr '\n' ' ' || echo "")
+          # 获取提交的详细信息来获取文件列表
+          COMMIT_DETAIL=$(curl -s "https://api.github.com/repos/$OWNER/$REPO/commits/$COMMIT_SHA")
+          FILES=$(echo "$COMMIT_DETAIL" | jq -r '.files[].filename' | tr '\n' ' ' || echo "")
           echo "文件列表: $FILES"
 
           # 获取 SrcVersion.ini 文件内容
@@ -59,10 +60,10 @@ jobs:
             echo "$STABLE_VERSION|$BETA_VERSION" > "$LAST_VERSION_FILE"
             echo "✅ 初始状态已保存"
             
-            # 发送启动消息
+            # 只在第一次运行时发送启动消息
             curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
               -H "Content-Type: application/json" \
-              -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"🔧 完整监控服务已启动！\\n仓库: $OWNER/$REPO\\n仓库链接: $REPO_URL\\n当前稳定版本: $STABLE_VERSION\\n当前测试版本: $BETA_VERSION\\n\\n将监控：\\n- 文件更新 (.so/.exe)\\n- 版本变化 (SrcVersion.ini)\"}"
+              -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"🔧 完整监控服务已启动！\\n仓库: $OWNER/$REPO\\n当前稳定版本: $STABLE_VERSION\\n当前测试版本: $BETA_VERSION\\n\\n将监控：\\n- 文件更新 (.so/.exe)\\n- 版本变化 (SrcVersion.ini)\"}"
             exit 0
           fi
 
@@ -106,10 +107,9 @@ jobs:
                   ;;
                 "SrcVersion.ini")
                   # 版本文件更新会在版本比较中处理
-                  FILE_UPDATES+="📝 版本配置文件已更新\n"
                   ;;
                 *)
-                  FILE_UPDATES+="📝 其他文件: $file\n"
+                  # 忽略其他文件，除非是重要文件
                   ;;
               esac
             done
@@ -123,6 +123,10 @@ jobs:
             echo "🚨 稳定版本更新: $LAST_STABLE -> $STABLE_VERSION"
             HAS_UPDATE=true
             
+            if [ -z "$MESSAGE" ]; then
+              MESSAGE="📢 版本更新通知！\n\n"
+            fi
+            
             VERSION_CHANGES+="✅ 稳定通道更新: $STABLE_VERSION\n"
             if [ -n "$LAST_STABLE" ]; then
               VERSION_CHANGES+="之前版本: $LAST_STABLE\n"
@@ -134,6 +138,10 @@ jobs:
             echo "🚨 测试版本更新: $LAST_BETA -> $BETA_VERSION"
             HAS_UPDATE=true
             
+            if [ -z "$MESSAGE" ]; then
+              MESSAGE="📢 版本更新通知！\n\n"
+            fi
+            
             VERSION_CHANGES+="🧪 测试通道更新: $BETA_VERSION\n"
             if [ -n "$LAST_BETA" ]; then
               VERSION_CHANGES+="之前版本: $LAST_BETA\n"
@@ -141,7 +149,7 @@ jobs:
             VERSION_CHANGES+="\n"
           fi
 
-          # 如果有更新，发送消息并保存新版本信息
+          # 只有在有实际更新时才发送消息
           if [ "$HAS_UPDATE" = true ]; then
             # 保存新版本信息
             echo "$STABLE_VERSION|$BETA_VERSION" > "$LAST_VERSION_FILE"
@@ -165,5 +173,5 @@ jobs:
             echo "Telegram API 响应: $RESPONSE"
             
           else
-            echo "✅ 没有检测到更新"
+            echo "✅ 没有检测到更新，不发送通知"
           fi
