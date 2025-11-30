@@ -8,51 +8,53 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    env:
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+      CHAT_ID: ${{ secrets.CHAT_ID }}
     steps:
-      - name: Install jq
+      - name: 安装 jq
         run: |
           sudo apt-get update || true
           sudo apt-get install -y jq || true
 
-      - name: Check repository updates
+      - name: 检查仓库更新
         run: |
           OWNER="vampycloudia"
           REPO="hanikorekhar"
           LAST_FILE="last.txt"
 
-          # 获取最新提交文件列表，出错返回空字符串
+          # 获取最新提交文件列表
           FILES=$(curl -s https://api.github.com/repos/$OWNER/$REPO/commits/main | jq -r '.[0].files[].filename' || echo "")
 
           # 第一次运行，保存文件列表并退出
           if [ ! -f $LAST_FILE ]; then
-            echo "$FILES" > $LAST_FILE || true
+            echo "$FILES" > $LAST_FILE
             exit 0
           fi
 
           # 读取上次保存的文件列表
-          OLD=$(cat $LAST_FILE || echo "")
+          OLD=$(cat $LAST_FILE)
 
           # 找出更新文件
-          UPDATED_FILES=$(comm -13 <(echo "$OLD" | sort) <(echo "$FILES" | sort) || true)
+          UPDATED_FILES=$(comm -13 <(echo "$OLD" | sort) <(echo "$FILES" | sort))
 
           if [ ! -z "$UPDATED_FILES" ]; then
-            echo "$FILES" > $LAST_FILE || true
+            echo "$FILES" > $LAST_FILE
 
-            # 循环更新文件发送 Telegram 提醒
             for file in $UPDATED_FILES; do
               if [ "$file" = "IllI.exe" ]; then
-                MESSAGE="🚨 Emulator Loader updated: https://github.com/$OWNER/$REPO"
+                MESSAGE="🚨 模拟器加载器已更新: https://github.com/$OWNER/$REPO"
               elif [ "$file" = "libvampy64.so" ]; then
-                MESSAGE="🚨 Direct Cloud updated: https://github.com/$OWNER/$REPO"
+                MESSAGE="🚨 直装云已更新: https://github.com/$OWNER/$REPO"
               elif [ "$file" = "libvampybeta64.so" ]; then
-                MESSAGE="🚨 Beta version updated: https://github.com/$OWNER/$REPO"
+                MESSAGE="🚨 测试版已更新: https://github.com/$OWNER/$REPO"
               else
-                MESSAGE="🚨 Repository updated: $file"
+                MESSAGE="🚨 仓库已更新: $file"
               fi
 
               # 发送 Telegram 消息
-              curl -s -X POST "https://api.telegram.org/bot${{ secrets.BOT_TOKEN }}/sendMessage" \
+              curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
                 -H "Content-Type: application/json" \
-                -d "{\"chat_id\": \"${{ secrets.CHAT_ID }}\", \"text\": \"$MESSAGE\"}" || true
+                -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"$MESSAGE\"}"
             done
           fi
