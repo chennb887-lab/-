@@ -14,18 +14,29 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y jq curl
 
+      - name: 恢复缓存状态
+        uses: actions/cache@v3
+        with:
+          path: |
+            .github/monitor_state
+          key: monitor-state-${{ github.ref }}
+
       - name: 检查仓库更新和版本变化
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
-          echo "BOT_TOKEN 长度: ${#BOT_TOKEN}"
-          echo "CHAT_ID: $CHAT_ID"
+          # 创建状态目录
+          mkdir -p .github/monitor_state
           
           OWNER="vampycloudia"
           REPO="hanikorekhar"
-          LAST_COMMIT_FILE="last_commit.txt"
-          LAST_VERSION_FILE="last_version.txt"
+          LAST_COMMIT_FILE=".github/monitor_state/last_commit.txt"
+          LAST_VERSION_FILE=".github/monitor_state/last_version.txt"
+          INIT_FLAG_FILE=".github/monitor_state/initialized.txt"
+
+          echo "BOT_TOKEN 长度: ${#BOT_TOKEN}"
+          echo "CHAT_ID: $CHAT_ID"
 
           # 获取最新提交信息
           LATEST_COMMIT=$(curl -s "https://api.github.com/repos/$OWNER/$REPO/commits/main")
@@ -54,22 +65,24 @@ jobs:
           echo "测试版本: $BETA_VERSION"
 
           # 检查是否是第一次运行
-          if [ ! -f "$LAST_COMMIT_FILE" ] || [ ! -f "$LAST_VERSION_FILE" ]; then
+          if [ ! -f "$INIT_FLAG_FILE" ]; then
             echo "第一次运行，保存当前状态"
             echo "$COMMIT_SHA" > "$LAST_COMMIT_FILE"
             echo "$STABLE_VERSION|$BETA_VERSION" > "$LAST_VERSION_FILE"
-            echo "✅ 初始状态已保存"
+            echo "initialized" > "$INIT_FLAG_FILE"
             
-            # 只在第一次运行时发送启动消息
+            # 只在真正的第一次运行时发送启动消息
             curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
               -H "Content-Type: application/json" \
-              -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"🔧 完整监控服务已启动！\\n仓库: $OWNER/$REPO\\n当前稳定版本: $STABLE_VERSION\\n当前测试版本: $BETA_VERSION\\n\\n将监控：\\n- 文件更新 (.so/.exe)\\n- 版本变化 (SrcVersion.ini)\"}"
+              -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"🔧 监控服务已启动！\\n仓库: $OWNER/$REPO\\n当前稳定版本: $STABLE_VERSION\\n当前测试版本: $BETA_VERSION\\n\\n监控类型：\\n- 文件更新 (.so/.exe)\\n- 版本变化\"}"
+            
+            echo "✅ 初始状态已保存，启动消息已发送"
             exit 0
           fi
 
           # 读取上次保存的状态
-          LAST_SHA=$(cat "$LAST_COMMIT_FILE")
-          LAST_VERSION_DATA=$(cat "$LAST_VERSION_FILE")
+          LAST_SHA=$(cat "$LAST_COMMIT_FILE" 2>/dev/null || echo "")
+          LAST_VERSION_DATA=$(cat "$LAST_VERSION_FILE" 2>/dev/null || echo "")
           LAST_STABLE=$(echo "$LAST_VERSION_DATA" | cut -d'|' -f1)
           LAST_BETA=$(echo "$LAST_VERSION_DATA" | cut -d'|' -f2)
           
@@ -84,7 +97,7 @@ jobs:
           VERSION_CHANGES=""
 
           # 比较提交SHA - 检测文件更新
-          if [ "$COMMIT_SHA" != "$LAST_SHA" ]; then
+          if [ "$COMMIT_SHA" != "$LAST_SHA" ] && [ -n "$LAST_SHA" ]; then
             echo "🚨 检测到新提交: $LAST_SHA -> $COMMIT_SHA"
             HAS_UPDATE=true
             
@@ -108,9 +121,6 @@ jobs:
                 "SrcVersion.ini")
                   # 版本文件更新会在版本比较中处理
                   ;;
-                *)
-                  # 忽略其他文件，除非是重要文件
-                  ;;
               esac
             done
             
@@ -119,7 +129,7 @@ jobs:
           fi
 
           # 比较版本信息
-          if [ "$STABLE_VERSION" != "$LAST_STABLE" ] && [ -n "$STABLE_VERSION" ]; then
+          if [ "$STABLE_VERSION" != "$LAST_STABLE" ] && [ -n "$STABLE_VERSION" ] && [ -n "$LAST_STABLE" ]; then
             echo "🚨 稳定版本更新: $LAST_STABLE -> $STABLE_VERSION"
             HAS_UPDATE=true
             
@@ -128,13 +138,10 @@ jobs:
             fi
             
             VERSION_CHANGES+="✅ 稳定通道更新: $STABLE_VERSION\n"
-            if [ -n "$LAST_STABLE" ]; then
-              VERSION_CHANGES+="之前版本: $LAST_STABLE\n"
-            fi
-            VERSION_CHANGES+="\n"
+            VERSION_CHANGES+="之前版本: $LAST_STABLE\n\n"
           fi
 
-          if [ "$BETA_VERSION" != "$LAST_BETA" ] && [ -n "$BETA_VERSION" ]; then
+          if [ "$BETA_VERSION" != "$LAST_BETA" ] && [ -n "$BETA_VERSION" ] && [ -n "$LAST_BETA" ]; then
             echo "🚨 测试版本更新: $LAST_BETA -> $BETA_VERSION"
             HAS_UPDATE=true
             
@@ -143,10 +150,7 @@ jobs:
             fi
             
             VERSION_CHANGES+="🧪 测试通道更新: $BETA_VERSION\n"
-            if [ -n "$LAST_BETA" ]; then
-              VERSION_CHANGES+="之前版本: $LAST_BETA\n"
-            fi
-            VERSION_CHANGES+="\n"
+            VERSION_CHANGES+="之前版本: $LAST_BETA\n\n"
           fi
 
           # 只有在有实际更新时才发送消息
@@ -166,11 +170,9 @@ jobs:
             echo "发送消息: $MESSAGE"
             
             # 发送 Telegram 消息
-            RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+            curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
               -H "Content-Type: application/json" \
-              -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"$MESSAGE\", \"parse_mode\": \"Markdown\"}")
-            
-            echo "Telegram API 响应: $RESPONSE"
+              -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"$MESSAGE\", \"parse_mode\": \"Markdown\"}"
             
           else
             echo "✅ 没有检测到更新，不发送通知"
