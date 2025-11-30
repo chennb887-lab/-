@@ -29,10 +29,13 @@ jobs:
 
           # 获取最新提交信息
           LATEST_COMMIT=$(curl -s "https://api.github.com/repos/$OWNER/$REPO/commits/main")
-          COMMIT_SHA=$(echo "$LATEST_COMMIT" | jq -r '.sha' | cut -c1-7)
-          COMMIT_URL=$(echo "$LATEST_COMMIT" | jq -r '.html_url')
+          COMMIT_SHA=$(echo "$LATEST_COMMIT" | jq -r '.sha')
+          COMMIT_SHA_SHORT=$(echo "$COMMIT_SHA" | cut -c1-7)
+          COMMIT_URL="https://github.com/$OWNER/$REPO/commit/$COMMIT_SHA"
+          REPO_URL="https://github.com/$OWNER/$REPO"
           
           echo "最新提交SHA: $COMMIT_SHA"
+          echo "提交链接: $COMMIT_URL"
           
           # 获取提交的文件列表
           FILES=$(echo "$LATEST_COMMIT" | jq -r '.files[].filename' | tr '\n' ' ' || echo "")
@@ -59,7 +62,7 @@ jobs:
             # 发送启动消息
             curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
               -H "Content-Type: application/json" \
-              -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"🔧 完整监控服务已启动！\\n仓库: $OWNER/$REPO\\n当前稳定版本: $STABLE_VERSION\\n当前测试版本: $BETA_VERSION\\n\\n将监控：\\n- 文件更新 (.so/.exe)\\n- 版本变化 (SrcVersion.ini)\"}"
+              -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"🔧 完整监控服务已启动！\\n仓库: $OWNER/$REPO\\n仓库链接: $REPO_URL\\n当前稳定版本: $STABLE_VERSION\\n当前测试版本: $BETA_VERSION\\n\\n将监控：\\n- 文件更新 (.so/.exe)\\n- 版本变化 (SrcVersion.ini)\"}"
             exit 0
           fi
 
@@ -86,7 +89,7 @@ jobs:
             
             # 添加基本更新信息
             MESSAGE="📢 仓库已更新！\n\n"
-            MESSAGE+="提交: $COMMIT_SHA\n"
+            MESSAGE+="提交: $COMMIT_SHA_SHORT\n"
             MESSAGE+="链接: $COMMIT_URL\n\n"
             
             # 检查特定文件更新
