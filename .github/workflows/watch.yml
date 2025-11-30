@@ -11,8 +11,8 @@ jobs:
     steps:
       - name: Install jq
         run: |
-          sudo apt-get update
-          sudo apt-get install -y jq
+          sudo apt-get update || true
+          sudo apt-get install -y jq || true
 
       - name: Check repository updates
         run: |
@@ -20,24 +20,23 @@ jobs:
           REPO="hanikorekhar"
           LAST_FILE="last.txt"
 
-          # 获取最新提交文件列表
-          FILES=$(curl -s https://api.github.com/repos/$OWNER/$REPO/commits/main \
-            | jq -r '.[0].files[].filename')
+          # 获取最新提交文件列表，出错返回空字符串
+          FILES=$(curl -s https://api.github.com/repos/$OWNER/$REPO/commits/main | jq -r '.[0].files[].filename' || echo "")
 
           # 第一次运行，保存文件列表并退出
           if [ ! -f $LAST_FILE ]; then
-            echo "$FILES" > $LAST_FILE
+            echo "$FILES" > $LAST_FILE || true
             exit 0
           fi
 
           # 读取上次保存的文件列表
-          OLD=$(cat $LAST_FILE)
+          OLD=$(cat $LAST_FILE || echo "")
 
           # 找出更新文件
           UPDATED_FILES=$(comm -13 <(echo "$OLD" | sort) <(echo "$FILES" | sort) || true)
 
           if [ ! -z "$UPDATED_FILES" ]; then
-            echo "$FILES" > $LAST_FILE
+            echo "$FILES" > $LAST_FILE || true
 
             # 循环更新文件发送 Telegram 提醒
             for file in $UPDATED_FILES; do
@@ -54,6 +53,6 @@ jobs:
               # 发送 Telegram 消息
               curl -s -X POST "https://api.telegram.org/bot${{ secrets.BOT_TOKEN }}/sendMessage" \
                 -H "Content-Type: application/json" \
-                -d "{\"chat_id\": \"${{ secrets.CHAT_ID }}\", \"text\": \"$MESSAGE\"}"
+                -d "{\"chat_id\": \"${{ secrets.CHAT_ID }}\", \"text\": \"$MESSAGE\"}" || true
             done
           fi
