@@ -8,47 +8,54 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+
     steps:
+      - name: Restore state cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            monitor_state.txt
+            version_state.txt
+          key: repo-monitor-state
+          restore-keys: repo-monitor-state
+
       - name: Check for updates
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
-          # State file
           STATE_FILE="monitor_state.txt"
-          
-          # Repository info
+
           OWNER="vampycloudia"
           REPO="hanikorekhar"
-          
-          # Get latest commit
+
+          # 获取最新 commit
           COMMIT=$(curl -s "https://api.github.com/repos/$OWNER/$REPO/commits/main")
           COMMIT_SHA=$(echo "$COMMIT" | jq -r '.sha')
-          
-          # Read last commit
+
+          # 读取上次 commit
           if [ -f "$STATE_FILE" ]; then
             LAST_SHA=$(cat "$STATE_FILE")
           else
             LAST_SHA=""
             echo "$COMMIT_SHA" > "$STATE_FILE"
-            echo "Starting repository monitoring"
+            echo "首次监控，记录版本后退出"
             exit 0
           fi
-          
-          # Compare commits
+
+          # 没更新直接退出（不会发通知）
           if [ "$COMMIT_SHA" = "$LAST_SHA" ]; then
-            exit 0  # No update, exit quietly
+            exit 0
           fi
-          
-          # Get updated files
+
+          # ----------- 你的原逻辑：文件更新/版本更新通知 -----------
+
           COMMIT_DETAIL=$(curl -s "https://api.github.com/repos/$OWNER/$REPO/commits/$COMMIT_SHA")
           FILES=$(echo "$COMMIT_DETAIL" | jq -r '.files[].filename' | tr '\n' ' ')
-          
-          # Check for specific files
+
           MESSAGE=""
           UPDATED_FILES=""
-          
-          # Check file updates
+
           for file in $FILES; do
             case "$file" in
               "IllI.exe")
@@ -62,50 +69,48 @@ jobs:
                 ;;
             esac
           done
-          
-          # Check version update
+
+          # 检查版本文件
           if [[ "$FILES" == *"SrcVersion.ini"* ]]; then
             VERSION_CONTENT=$(curl -s "https://raw.githubusercontent.com/$OWNER/$REPO/main/SrcVersion.ini")
             STABLE_VERSION=$(echo "$VERSION_CONTENT" | grep "stable_channel" | cut -d'=' -f2 | tr -d ' ')
             BETA_VERSION=$(echo "$VERSION_CONTENT" | grep "beta_channel" | cut -d'=' -f2 | tr -d ' ')
-            
-            # Try to read old versions
+
             if [ -f "version_state.txt" ]; then
-              OLD_VERSIONS=$(cat "version_state.txt")
-              OLD_STABLE=$(echo "$OLD_VERSIONS" | cut -d'|' -f1)
-              OLD_BETA=$(echo "$OLD_VERSIONS" | cut -d'|' -f2)
-              
-              # Compare stable version
+              OLD_STABLE=$(cut -d'|' -f1 version_state.txt)
+              OLD_BETA=$(cut -d'|' -f2 version_state.txt)
+
               if [ "$STABLE_VERSION" != "$OLD_STABLE" ]; then
                 MESSAGE+="✅ 稳定通道更新: $STABLE_VERSION\n"
               fi
-              
-              # Compare beta version
+
               if [ "$BETA_VERSION" != "$OLD_BETA" ]; then
                 MESSAGE+="🧪 测试通道更新: $BETA_VERSION\n"
               fi
             fi
-            
-            # Save new versions
-            echo "$STABLE_VERSION|$BETA_VERSION" > "version_state.txt"
+
+            echo "$STABLE_VERSION|$BETA_VERSION" > version_state.txt
           fi
-          
-          # If there are file updates
+
           if [ -n "$UPDATED_FILES" ]; then
-            if [ -n "$MESSAGE" ]; then
-              MESSAGE+="\n📁 文件更新:\n$UPDATED_FILES"
-            else
-              MESSAGE="📁 文件更新:\n$UPDATED_FILES"
-            fi
+            MESSAGE+="📁 文件更新:\n$UPDATED_FILES"
           fi
-          
-          # Send notification if there are updates
+
+          # 有消息才发送
           if [ -n "$MESSAGE" ]; then
-            # Send notification
             curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
               -H "Content-Type: application/json" \
               -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"$MESSAGE\"}"
-            
-            # Save new state
-            echo "$COMMIT_SHA" > "$STATE_FILE"
           fi
+
+          # 保存新的 commit 状态
+          echo "$COMMIT_SHA" > "$STATE_FILE"
+
+      - name: Save updated cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            monitor_state.txt
+            version_state.txt
+          key: repo-monitor-state-${{ github.run_id }}
+          restore-keys: repo-monitor-state
