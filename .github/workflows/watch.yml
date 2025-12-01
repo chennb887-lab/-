@@ -30,21 +30,24 @@ jobs:
           COMMIT_INFO=$(curl -s "https://api.github.com/repos/$OWNER/$REPO/commits/main")
           CURRENT_COMMIT=$(echo "$COMMIT_INFO" | jq -r '.sha')
           
+          # 获取当前版本信息
+          VERSION_CONTENT=$(curl -s "https://raw.githubusercontent.com/$OWNER/$REPO/main/SrcVersion.ini" || echo "")
+          CURRENT_STABLE=$(echo "$VERSION_CONTENT" | grep "stable_channel" | cut -d'=' -f2 | tr -d ' ' || echo "获取失败")
+          CURRENT_BETA=$(echo "$VERSION_CONTENT" | grep "beta_channel" | cut -d'=' -f2 | tr -d ' ' || echo "获取失败")
+          
+          echo "当前稳定版本: $CURRENT_STABLE"
+          echo "当前测试版本: $CURRENT_BETA"
+          
           # 检查上次提交
           if [ -f "$LAST_COMMIT_FILE" ]; then
             LAST_COMMIT=$(cat "$LAST_COMMIT_FILE")
           else
             # 第一次运行，保存状态并发送启动消息
             echo "$CURRENT_COMMIT" > "$LAST_COMMIT_FILE"
+            echo "$CURRENT_STABLE|$CURRENT_BETA" > "$LAST_VERSION_FILE"
             
-            # 获取并保存版本信息
-            VERSION_CONTENT=$(curl -s "https://raw.githubusercontent.com/$OWNER/$REPO/main/SrcVersion.ini" || echo "")
-            STABLE_VERSION=$(echo "$VERSION_CONTENT" | grep "stable_channel" | cut -d'=' -f2 | tr -d ' ' || echo "")
-            BETA_VERSION=$(echo "$VERSION_CONTENT" | grep "beta_channel" | cut -d'=' -f2 | tr -d ' ' || echo "")
-            echo "$STABLE_VERSION|$BETA_VERSION" > "$LAST_VERSION_FILE"
-            
-            # 发送启动消息（只在第一次运行或手动触发时）
-            START_MESSAGE="🔧 监控服务已启动\n当前稳定版本: $STABLE_VERSION\n当前测试版本: $BETA_VERSION"
+            # 发送启动消息
+            START_MESSAGE="🔧 监控服务已启动\n当前稳定版本: $CURRENT_STABLE\n当前测试版本: $CURRENT_BETA"
             
             curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
               -H "Content-Type: application/json" \
@@ -53,15 +56,6 @@ jobs:
             echo "第一次运行，已发送启动消息"
             exit 0
           fi
-          
-          # 获取更新的文件
-          COMMIT_DETAIL=$(curl -s "https://api.github.com/repos/$OWNER/$REPO/commits/$CURRENT_COMMIT")
-          FILES=$(echo "$COMMIT_DETAIL" | jq -r '.files[].filename' | tr '\n' ' ' || echo "")
-          
-          # 获取当前版本
-          VERSION_CONTENT=$(curl -s "https://raw.githubusercontent.com/$OWNER/$REPO/main/SrcVersion.ini" || echo "")
-          CURRENT_STABLE=$(echo "$VERSION_CONTENT" | grep "stable_channel" | cut -d'=' -f2 | tr -d ' ' || echo "")
-          CURRENT_BETA=$(echo "$VERSION_CONTENT" | grep "beta_channel" | cut -d'=' -f2 | tr -d ' ' || echo "")
           
           # 读取旧版本
           if [ -f "$LAST_VERSION_FILE" ]; then
@@ -73,34 +67,38 @@ jobs:
             OLD_BETA=""
           fi
           
-          # 构建消息
-          MESSAGE=""
-          
-          # 检查文件更新
-          if [[ "$FILES" == *"IllI.exe"* ]]; then
-            MESSAGE+="模拟器加载器已更新\n"
-          fi
-          
-          if [[ "$FILES" == *"libvampy64.so"* ]]; then
-            MESSAGE+="直装云已更新\n"
-          fi
-          
-          if [[ "$FILES" == *"libvampybeta64.so"* ]]; then
-            MESSAGE+="测试版已更新\n"
-          fi
-          
-          # 检查版本更新
-          if [ -n "$CURRENT_STABLE" ] && [ -n "$OLD_STABLE" ] && [ "$CURRENT_STABLE" != "$OLD_STABLE" ]; then
-            MESSAGE+="稳定通道更新: $CURRENT_STABLE\n"
-          fi
-          
-          if [ -n "$CURRENT_BETA" ] && [ -n "$OLD_BETA" ] && [ "$CURRENT_BETA" != "$OLD_BETA" ]; then
-            MESSAGE+="测试通道更新: $CURRENT_BETA\n"
-          fi
-          
           # 检查是否有新提交
           if [ "$CURRENT_COMMIT" != "$LAST_COMMIT" ]; then
-            # 如果有更新，但MESSAGE为空（更新了其他不重要的文件），则不发送通知
+            # 有新提交，获取更新的文件
+            COMMIT_DETAIL=$(curl -s "https://api.github.com/repos/$OWNER/$REPO/commits/$CURRENT_COMMIT")
+            FILES=$(echo "$COMMIT_DETAIL" | jq -r '.files[].filename' | tr '\n' ' ' || echo "")
+            
+            # 构建更新消息
+            MESSAGE=""
+            
+            # 检查文件更新
+            if [[ "$FILES" == *"IllI.exe"* ]]; then
+              MESSAGE+="模拟器加载器已更新\n"
+            fi
+            
+            if [[ "$FILES" == *"libvampy64.so"* ]]; then
+              MESSAGE+="直装云已更新\n"
+            fi
+            
+            if [[ "$FILES" == *"libvampybeta64.so"* ]]; then
+              MESSAGE+="测试版已更新\n"
+            fi
+            
+            # 检查版本更新
+            if [ -n "$CURRENT_STABLE" ] && [ -n "$OLD_STABLE" ] && [ "$CURRENT_STABLE" != "$OLD_STABLE" ]; then
+              MESSAGE+="稳定通道更新: $OLD_STABLE → $CURRENT_STABLE\n"
+            fi
+            
+            if [ -n "$CURRENT_BETA" ] && [ -n "$OLD_BETA" ] && [ "$CURRENT_BETA" != "$OLD_BETA" ]; then
+              MESSAGE+="测试通道更新: $OLD_BETA → $CURRENT_BETA\n"
+            fi
+            
+            # 如果有重要更新，发送通知
             if [ -n "$MESSAGE" ]; then
               # 发送更新通知
               curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
