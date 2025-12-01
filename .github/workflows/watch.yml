@@ -19,123 +19,132 @@ jobs:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
-          echo "=== 开始检查 ==="
+          echo "=== 开始监控 ==="
           
           # 仓库信息
           OWNER="vampycloudia"
           REPO="hanikorekhar"
           
-          # 1. 获取最新提交
-          echo "1. 获取最新提交..."
-          LATEST_COMMIT=$(curl -s "https://api.github.com/repos/$OWNER/$REPO/commits/main")
-          COMMIT_SHA=$(echo "$LATEST_COMMIT" | jq -r '.sha')
-          echo "最新提交SHA: $COMMIT_SHA"
-          
-          # 2. 获取提交的文件列表
-          echo "2. 获取文件列表..."
-          COMMIT_DETAIL=$(curl -s "https://api.github.com/repos/$OWNER/$REPO/commits/$COMMIT_SHA")
-          FILES=$(echo "$COMMIT_DETAIL" | jq -r '.files[].filename' 2>/dev/null || echo "")
-          echo "文件列表: $FILES"
-          
-          # 3. 获取版本信息
-          echo "3. 获取版本信息..."
-          VERSION_FILE_URL="https://raw.githubusercontent.com/$OWNER/$REPO/main/ScrVersion.ini"
-          VERSION_CONTENT=$(curl -s "$VERSION_FILE_URL" || echo "")
-          echo "版本文件内容:"
-          echo "$VERSION_CONTENT"
-          
-          # 4. 解析版本信息
-          STABLE_VERSION=$(echo "$VERSION_CONTENT" | grep "Release_channel" | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-          BETA_VERSION=$(echo "$VERSION_CONTENT" | grep "Dev_channel" | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-          
-          echo "稳定版本: '$STABLE_VERSION'"
-          echo "测试版本: '$BETA_VERSION'"
-          
-          # 5. 检查状态文件
-          echo "5. 检查状态文件..."
+          # 状态文件
           STATE_DIR=".github/monitor_state"
           LAST_COMMIT_FILE="$STATE_DIR/last_commit.txt"
-          LAST_VERSION_FILE="$STATE_DIR/last_version.txt"
-          
           mkdir -p "$STATE_DIR"
           
+          # 1. 获取最新提交
+          LATEST_COMMIT=$(curl -s "https://api.github.com/repos/$OWNER/$REPO/commits/main")
+          CURRENT_COMMIT=$(echo "$LATEST_COMMIT" | jq -r '.sha')
+          echo "当前提交: $CURRENT_COMMIT"
+          
+          # 2. 获取提交的详细信息
+          COMMIT_DETAIL=$(curl -s "https://api.github.com/repos/$OWNER/$REPO/commits/$CURRENT_COMMIT")
+          FILES=$(echo "$COMMIT_DETAIL" | jq -r '.files[].filename' 2>/dev/null || echo "")
+          echo "更新的文件: $FILES"
+          
+          # 3. 检查上次提交
           if [ ! -f "$LAST_COMMIT_FILE" ]; then
-            echo "第一次运行，保存状态..."
-            echo "$COMMIT_SHA" > "$LAST_COMMIT_FILE"
-            echo "$STABLE_VERSION|$BETA_VERSION" > "$LAST_VERSION_FILE"
+            echo "第一次运行，保存状态"
+            echo "$CURRENT_COMMIT" > "$LAST_COMMIT_FILE"
             echo "✅ 初始状态已保存"
             exit 0
           fi
           
-          # 6. 读取上次状态
-          LAST_SHA=$(cat "$LAST_COMMIT_FILE" 2>/dev/null || echo "")
-          LAST_VERSION_DATA=$(cat "$LAST_VERSION_FILE" 2>/dev/null || echo "||")
-          LAST_STABLE=$(echo "$LAST_VERSION_DATA" | cut -d'|' -f1)
-          LAST_BETA=$(echo "$LAST_VERSION_DATA" | cut -d'|' -f2)
+          LAST_COMMIT=$(cat "$LAST_COMMIT_FILE" 2>/dev/null || echo "")
+          echo "上次提交: $LAST_COMMIT"
           
-          echo "上次提交: $LAST_SHA"
-          echo "上次稳定版本: '$LAST_STABLE'"
-          echo "上次测试版本: '$LAST_BETA'"
-          
-          # 7. 检查是否有更新
-          if [ "$COMMIT_SHA" != "$LAST_SHA" ] && [ -n "$LAST_SHA" ]; then
-            echo "🚨 检测到新提交！"
-            
-            # 构建消息
-            MESSAGE=""
-            
-            # 检查文件更新
-            for file in $FILES; do
-              case "$file" in
-                "IllI.exe")
-                  MESSAGE+="模拟器加载器已更新\n"
-                  ;;
-                "libvampy64.so")
-                  MESSAGE+="直装已更新\n"
-                  ;;
-                "libvampybeta64.so")
-                  MESSAGE+="测试版已更新\n"
-                  ;;
-              esac
-            done
-            
-            # 检查版本更新
-            if [ -n "$STABLE_VERSION" ] && [ -n "$LAST_STABLE" ] && [ "$STABLE_VERSION" != "$LAST_STABLE" ]; then
-              MESSAGE+="稳定通道更新: $LAST_STABLE → $STABLE_VERSION\n"
-            fi
-            
-            if [ -n "$BETA_VERSION" ] && [ -n "$LAST_BETA" ] && [ "$BETA_VERSION" != "$LAST_BETA" ]; then
-              MESSAGE+="测试通道更新: $LAST_BETA → $BETA_VERSION\n"
-            fi
-            
-            echo "构建的消息:"
-            echo "$MESSAGE"
-            
-            # 8. 发送通知
-            if [ -n "$MESSAGE" ]; then
-              echo "发送通知..."
-              
-              # 添加调试信息
-              echo "发送的JSON:"
-              echo "{\"chat_id\": \"$CHAT_ID\", \"text\": \"$MESSAGE\"}"
-              
-              RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
-                -H "Content-Type: application/json" \
-                -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"$MESSAGE\"}")
-              
-              echo "Telegram响应: $RESPONSE"
-              
-              # 保存新状态
-              echo "$COMMIT_SHA" > "$LAST_COMMIT_FILE"
-              echo "$STABLE_VERSION|$BETA_VERSION" > "$LAST_VERSION_FILE"
-              
-              echo "✅ 已发送通知"
-            else
-              echo "⚠️ 没有检测到重要更新"
-              echo "$COMMIT_SHA" > "$LAST_COMMIT_FILE"
-            fi
-          else
+          # 4. 比较提交
+          if [ "$CURRENT_COMMIT" = "$LAST_COMMIT" ]; then
             echo "✅ 没有新提交"
+            exit 0
           fi
           
-          echo "=== 检查完成 ==="
+          echo "🚨 检测到新提交: $LAST_COMMIT -> $CURRENT_COMMIT"
+          
+          # 5. 检查特定文件更新
+          MESSAGE=""
+          
+          # 转换为数组检查
+          IFS=' ' read -ra FILE_ARRAY <<< "$FILES"
+          
+          for file in "${FILE_ARRAY[@]}"; do
+            case "$file" in
+              "IllI.exe")
+                MESSAGE+="模拟器加载器已更新\n"
+                ;;
+              "libvampy64.so")
+                MESSAGE+="直装已更新\n"
+                ;;
+              "libvampybeta64.so")
+                MESSAGE+="测试版已更新\n"
+                ;;
+              "ScrVersion.ini")
+                # 版本文件更新单独处理
+                echo "检测到版本文件更新"
+                ;;
+            esac
+          done
+          
+          # 6. 检查版本更新
+          if [[ "$FILES" == *"ScrVersion.ini"* ]]; then
+            echo "获取版本信息..."
+            VERSION_CONTENT=$(curl -s "https://raw.githubusercontent.com/$OWNER/$REPO/main/ScrVersion.ini")
+            
+            # 读取上次版本
+            LAST_VERSION_FILE="$STATE_DIR/last_version.txt"
+            if [ -f "$LAST_VERSION_FILE" ]; then
+              OLD_VERSIONS=$(cat "$LAST_VERSION_FILE")
+              OLD_STABLE=$(echo "$OLD_VERSIONS" | cut -d'|' -f1)
+              OLD_BETA=$(echo "$OLD_VERSIONS" | cut -d'|' -f2)
+            else
+              OLD_STABLE=""
+              OLD_BETA=""
+            fi
+            
+            # 解析新版本
+            NEW_STABLE=$(echo "$VERSION_CONTENT" | grep "Release_channel" | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            NEW_BETA=$(echo "$VERSION_CONTENT" | grep "Dev_channel" | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            
+            echo "旧稳定版本: $OLD_STABLE"
+            echo "新稳定版本: $NEW_STABLE"
+            echo "旧测试版本: $OLD_BETA"
+            echo "新测试版本: $NEW_BETA"
+            
+            # 检查版本变化
+            if [ -n "$NEW_STABLE" ] && [ -n "$OLD_STABLE" ] && [ "$NEW_STABLE" != "$OLD_STABLE" ]; then
+              MESSAGE+="稳定通道更新: $OLD_STABLE → $NEW_STABLE\n"
+            fi
+            
+            if [ -n "$NEW_BETA" ] && [ -n "$OLD_BETA" ] && [ "$NEW_BETA" != "$OLD_BETA" ]; then
+              MESSAGE+="测试通道更新: $OLD_BETA → $NEW_BETA\n"
+            fi
+            
+            # 保存新版本
+            echo "$NEW_STABLE|$NEW_BETA" > "$LAST_VERSION_FILE"
+          fi
+          
+          # 7. 发送通知
+          if [ -n "$MESSAGE" ]; then
+            echo "发送通知..."
+            echo "消息内容:"
+            echo "$MESSAGE"
+            
+            # 确保消息不为空
+            if [ -z "$MESSAGE" ]; then
+              echo "⚠️ 消息为空，不发送"
+              MESSAGE="仓库已更新，但未检测到特定文件或版本变化"
+            fi
+            
+            # 发送到Telegram
+            curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+              -H "Content-Type: application/json" \
+              -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"$MESSAGE\"}"
+            
+            echo "✅ 通知已发送"
+          else
+            echo "⚠️ 没有检测到重要更新，不发送通知"
+          fi
+          
+          # 8. 保存新状态
+          echo "$CURRENT_COMMIT" > "$LAST_COMMIT_FILE"
+          echo "✅ 新状态已保存"
+          
+          echo "=== 监控完成 ==="
