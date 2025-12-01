@@ -1,0 +1,167 @@
+name: Debug Monitor Hanikorekhar Repository
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 安装必要工具
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq curl
+
+      - name: 检查仓库更新
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          echo "=== 开始调试 ==="
+          echo "当前时间: $(date)"
+          echo "触发类型: ${{ github.event_name }}"
+          
+          # 仓库信息
+          OWNER="vampycloudia"
+          REPO="hanikorekhar"
+          
+          echo "=== 获取最新提交 ==="
+          LATEST_COMMIT=$(curl -s "https://api.github.com/repos/$OWNER/$REPO/commits/main")
+          echo "API响应: $LATEST_COMMIT"
+          
+          COMMIT_SHA=$(echo "$LATEST_COMMIT" | jq -r '.sha')
+          echo "最新提交SHA: $COMMIT_SHA"
+          
+          # 获取提交详情
+          echo "=== 获取提交详情 ==="
+          COMMIT_DETAIL=$(curl -s "https://api.github.com/repos/$OWNER/$REPO/commits/$COMMIT_SHA")
+          echo "提交详情: $COMMIT_DETAIL"
+          
+          FILES=$(echo "$COMMIT_DETAIL" | jq -r '.files[].filename' || echo "")
+          echo "更新的文件列表: $FILES"
+          
+          # 检查特定文件
+          echo "=== 检查特定文件 ==="
+          for file in $FILES; do
+            echo "文件: $file"
+            case "$file" in
+              "IllI.exe")
+                echo "✅ 发现 IllI.exe"
+                ;;
+              "libvampy64.so")
+                echo "✅ 发现 libvampy64.so"
+                ;;
+              "libvampybeta64.so")
+                echo "✅ 发现 libvampybeta64.so"
+                ;;
+              "ScrVersion.ini")
+                echo "✅ 发现 ScrVersion.ini"
+                ;;
+            esac
+          done
+          
+          # 获取版本文件
+          echo "=== 获取版本文件 ==="
+          VERSION_FILE_URL="https://raw.githubusercontent.com/$OWNER/$REPO/main/ScrVersion.ini"
+echo"版本文件URL：$VERSION_FILE_URL"
+          
+version_CONTENT=$(curl-s"$VERSION_FILE_URL"||echo"获取失败")
+回显"版本文件内容："
+echo"$VERSION_CONTENT"
+          
+# 解析版本
+stable_VERSION=$(echo"$VERSION_CONTENT"|grep"Release_channel"|cut-d'='-f2|sed's/^[[：空间：]]*//；s/[[：space：]]*$//'||echo"未找到")
+beta_VERSION=$(echo"$VERSION_CONTENT"|grep"Dev_channel"|cut-d'='-f2|sed's/^[[：空间：]]*//；s/[[：space：]]*$//'||echo"未找到")
+          
+echo"解析的稳定版本：'$stable_VERSION'"
+echo"解析的测试版本：'$beta_VERSION'"
+          
+# 检查状态文件
+echo"===检查状态文件==="
+state_DIR=".github/monitor_state"
+last_COMMIT_FILE="$STATE_DIR/last_commit.txt"
+last_VERSION_FILE="$STATE_DIR/last_version。文本"
+          
+mkdir-p"$STATE_DIR"
+          
+如果[-f"$LAST_COMMIT_FILE"]；则
+last_SHA=$(cat"$LAST_COMMIT_FILE")
+回声"上次提交SHA：$LAST_SHA"
+其他
+回显"状态文件不存在，创建中...""状态文件不存在，创建中..."
+回声"$COMMIT_SHA">"$LAST_COMMIT_FILE""$COMMIT_SHA">"$LAST_COMMIT_FILE"
+回声"$STABLE_VERSION|$BETA_VERSION">"$LAST_VERSION_FILE""$STABLE_VERSION|$BETA_VERSION">"$LAST_VERSION_FILE"
+回显"✅ 初始状态已保存""✅ 初始状态已保存"
+退出0
+Fi
+          
+如果[-f"$LAST_VERSION_FILE"]；则[-f"$LAST_VERSION_FILE"]；则
+last_VERSION_DATA=$(cat"$LAST_VERSION_FILE")"$LAST_VERSION_FILE")
+last_STABLE=$(echo"$LAST_VERSION_DATA"|cut-d'|'-F1)"$LAST_VERSION_DATA"|cut-d'|'-F1)
+last_BETA=$(echo"$LAST_VERSION_DATA"|cut-d'|'-F2)"$LAST_VERSION_DATA"|cut-d'|'-F2)
+回声"上次稳定版本：'$last_STABLE'""上次稳定版本：'$last_STABLE'"
+回声"上次测试版本：'$last_BETA'""上次测试版本：'$last_BETA'"
+Fi
+          
+# 比较提交
+回声"===比较提交===""===比较提交==="
+如果["$COMMIT_SHA"！="$LAST_SHA"]&&[-n"$LAST_SHA"]；则["$COMMIT_SHA"！="$LAST_SHA"]&&[-n"$LAST_SHA"]；则
+回显"🚨 检测到新提交！""🚨 检测到新提交！"
+回声"旧：$last_SHA""旧：$last_SHA"
+回声"新：$commit_SHA"
+            
+# 构建消息
+消息=""
+            
+# 检查文件更新
+用于$FILES中的文件；做
+中的案例"$文件"
+"IllI.exe""IllI.exe")
+消息+="模拟器加载器已更新\n""模拟器加载器已更新\n"
+                  ;;
+"libvampy64.so""libvampy64.so")
+消息+="直装已更新\n"
+                  ;;
+"libvampybeta64.so")"libvampybeta64.so")
+消息+="测试版已更新\n""测试版已更新\n"
+                  ;;
+ESAC
+已完成
+            
+# 检查版本更新
+如果[-n"$STABLE_VERSION"]&&[-n"$LAST_STABLE"]&&["$STABLE_VERSION"！="$LAST_STABEL"]；则[-n"$STABEL_VERSION"]&&[-n"$LAST_STABEL"]&&["$STABEL_VERSION"！="$LAST_STABLE"]；则
+消息+="稳定通道更新：$last_Stabe→$Stabe_VERSION\n""稳定通道更新：$last_Stabe→$Stabe_VERSION\n"
+Fi
+            
+如果[-n"$BETA_VERSION"]&&[-n"$LAST_BETA"]&&["$BETA_VERSION"！="$LAST_BETA"]；则[-n"$BETA_VERSION"]&&[-n"$LAST_BETA"]&&["$BETA_VERSION"！="$LAST_BETA"]；则
+消息+="测试通道更新：$last_BETA→$BETA_VERSION\n""测试通道更新：$last_BETA→$BETA_VERSION\n"
+Fi
+            
+回显"构建的消息：""构建的消息："
+回声"$消息""$消息"
+            
+如果[-n"$消息"]；则[-n"$消息"]；则
+回显"准备发送通知...""准备发送通知..."
+              
+# 发送通知
+curl-s-X POST"https://api.telegram.org/bot$BOT_TOKEN/sendMessage"\"https://api.telegram.org/bot$BOT_TOKEN/sendMessage"\
+-h"内容类型：应用程序/JSON"\"内容类型：应用程序/JSON"\
+-d"{\"chat_id\"：\"$CHAT_ID\"，\"文本\"：\"$消息\"}\""{\"chat_id\"：\"$CHAT_ID\"，\"文本\"：\"$消息\"}"
+              
+回显"✅ 已发送通知""✅ 已发送通知"
+              
+# 保存新状态
+回声"$commit_SHA">"$LAST_COMMIT_FILE""$COMMIT_SHA">"$LAST_COMMIT_FILE"
+回声"$stable_VERSION|$BETA_VERSION">"$LAST_VERSION_FILE""$STABLE_VERSION|$BETA_VERSION">"$LAST_VERSION_FIL E"
+其他
+回显"⚠️ 没有重要文件或版本更新，不发送通知""⚠️ 没有重要文件或版本更新，不发送通知"
+回声"$commit_SHA">"$LAST_COMMIT_FILE""$COMMIT_SHA">"$LAST_COMMIT_FILE"
+Fi
+            
+其他
+回显"✅ 没有新提交""✅ 没有新提交"
+Fi
+          
+回声"===调试结束===""===调试结束==="
