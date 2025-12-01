@@ -4,9 +4,6 @@ on:
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/**'  # 当工作流文件被修改时触发
 
 jobs:
   check:
@@ -17,98 +14,77 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y jq curl
 
-      - name: 恢复缓存状态
-        uses: actions/cache@v3
-        with:
-          path: |
-            .github/monitor_state
-          key: monitor-state-${{ github.ref }}
-
-      - name: 检查仓库更新和版本变化
+      - name: 检查仓库更新
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
-          # 创建状态目录
-          mkdir -p .github/monitor_state
+          echo "=== 开始检查 ==="
           
+          # 仓库信息
           OWNER="vampycloudia"
           REPO="hanikorekhar"
-          LAST_COMMIT_FILE=".github/monitor_state/last_commit.txt"
-          LAST_VERSION_FILE=".github/monitor_state/last_version.txt"
-
-          # 首先检查是否是工作流文件被修改（测试消息）
-          if [ "${{ github.event_name }}" == "push" ] && [[ "${{ github.event.head_commit.message }}" == *"workflow"* || "${{ github.event.head_commit.message }}" == *".yml"* || "${{ github.event.head_commit.message }}" == *".yaml"* ]]; then
-            echo "检测到工作流文件更新，发送测试消息"
-            
-            # 获取当前版本信息
-            VERSION_FILE_URL="https://raw.githubusercontent.com/$OWNER/$REPO/main/ScrVersion.ini"
-            VERSION_CONTENT=$(curl -s "$VERSION_FILE_URL" || echo "")
-            STABLE_VERSION=$(echo "$VERSION_CONTENT" | grep "Release_channel" | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || echo "")
-            BETA_VERSION=$(echo "$VERSION_CONTENT" | grep "Dev_channel" | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || echo "")
-            
-            TEST_MESSAGE="🔧 监控工作流已更新\n"
-            TEST_MESSAGE+="✅ 通知功能测试正常\n\n"
-            
-            if [ -n "$STABLE_VERSION" ]; then
-              TEST_MESSAGE+="当前稳定版本: $STABLE_VERSION\n"
-            fi
-            
-            if [ -n "$BETA_VERSION" ]; then
-              TEST_MESSAGE+="当前测试版本: $BETA_VERSION\n"
-            fi
-            
-            TEST_MESSAGE+="\n下次仓库更新时会自动通知"
-            
-            curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
-              -H "Content-Type: application/json" \
-              -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"$TEST_MESSAGE\"}"
-            
-            echo "已发送工作流更新测试消息"
-            exit 0
-          fi
-
-          # 获取最新提交信息
+          
+          # 1. 获取最新提交
+          echo "1. 获取最新提交..."
           LATEST_COMMIT=$(curl -s "https://api.github.com/repos/$OWNER/$REPO/commits/main")
           COMMIT_SHA=$(echo "$LATEST_COMMIT" | jq -r '.sha')
+          echo "最新提交SHA: $COMMIT_SHA"
           
-          # 获取提交的文件列表
+          # 2. 获取提交的文件列表
+          echo "2. 获取文件列表..."
           COMMIT_DETAIL=$(curl -s "https://api.github.com/repos/$OWNER/$REPO/commits/$COMMIT_SHA")
-          FILES=$(echo "$COMMIT_DETAIL" | jq -r '.files[].filename' | tr '\n' ' ' || echo "")
-
-          # 获取 ScrVersion.ini 文件内容
+          FILES=$(echo "$COMMIT_DETAIL" | jq -r '.files[].filename' 2>/dev/null || echo "")
+          echo "文件列表: $FILES"
+          
+          # 3. 获取版本信息
+          echo "3. 获取版本信息..."
           VERSION_FILE_URL="https://raw.githubusercontent.com/$OWNER/$REPO/main/ScrVersion.ini"
           VERSION_CONTENT=$(curl -s "$VERSION_FILE_URL" || echo "")
+          echo "版本文件内容:"
+          echo "$VERSION_CONTENT"
           
-          # 正确解析版本信息
-          STABLE_VERSION=$(echo "$VERSION_CONTENT" | grep "Release_channel" | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || echo "")
-          BETA_VERSION=$(echo "$VERSION_CONTENT" | grep "Dev_channel" | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || echo "")
-
-          # 检查是否是第一次运行
+          # 4. 解析版本信息
+          STABLE_VERSION=$(echo "$VERSION_CONTENT" | grep "Release_channel" | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+          BETA_VERSION=$(echo "$VERSION_CONTENT" | grep "Dev_channel" | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+          
+          echo "稳定版本: '$STABLE_VERSION'"
+          echo "测试版本: '$BETA_VERSION'"
+          
+          # 5. 检查状态文件
+          echo "5. 检查状态文件..."
+          STATE_DIR=".github/monitor_state"
+          LAST_COMMIT_FILE="$STATE_DIR/last_commit.txt"
+          LAST_VERSION_FILE="$STATE_DIR/last_version.txt"
+          
+          mkdir -p "$STATE_DIR"
+          
           if [ ! -f "$LAST_COMMIT_FILE" ]; then
-            echo "第一次运行，保存当前状态"
+            echo "第一次运行，保存状态..."
             echo "$COMMIT_SHA" > "$LAST_COMMIT_FILE"
             echo "$STABLE_VERSION|$BETA_VERSION" > "$LAST_VERSION_FILE"
-            
-            # 第一次运行不发送任何通知（即使手动触发）
-            echo "✅ 初始状态已保存，不发送任何通知"
+            echo "✅ 初始状态已保存"
             exit 0
           fi
-
-          # 读取上次保存的状态
+          
+          # 6. 读取上次状态
           LAST_SHA=$(cat "$LAST_COMMIT_FILE" 2>/dev/null || echo "")
-          LAST_VERSION_DATA=$(cat "$LAST_VERSION_FILE" 2>/dev/null || echo "")
+          LAST_VERSION_DATA=$(cat "$LAST_VERSION_FILE" 2>/dev/null || echo "||")
           LAST_STABLE=$(echo "$LAST_VERSION_DATA" | cut -d'|' -f1)
           LAST_BETA=$(echo "$LAST_VERSION_DATA" | cut -d'|' -f2)
           
-          # 检查是否有新提交
+          echo "上次提交: $LAST_SHA"
+          echo "上次稳定版本: '$LAST_STABLE'"
+          echo "上次测试版本: '$LAST_BETA'"
+          
+          # 7. 检查是否有更新
           if [ "$COMMIT_SHA" != "$LAST_SHA" ] && [ -n "$LAST_SHA" ]; then
-            echo "检测到新提交: $LAST_SHA -> $COMMIT_SHA"
+            echo "🚨 检测到新提交！"
             
-            # 检查文件更新
+            # 构建消息
             MESSAGE=""
             
-            # 检查特定文件更新
+            # 检查文件更新
             for file in $FILES; do
               case "$file" in
                 "IllI.exe")
@@ -123,47 +99,43 @@ jobs:
               esac
             done
             
-            # 检查版本更新（稳定通道）
+            # 检查版本更新
             if [ -n "$STABLE_VERSION" ] && [ -n "$LAST_STABLE" ] && [ "$STABLE_VERSION" != "$LAST_STABLE" ]; then
-              if [ -n "$MESSAGE" ]; then
-                MESSAGE+="\n"
-              fi
               MESSAGE+="稳定通道更新: $LAST_STABLE → $STABLE_VERSION\n"
             fi
             
-            # 检查版本更新（测试通道）
             if [ -n "$BETA_VERSION" ] && [ -n "$LAST_BETA" ] && [ "$BETA_VERSION" != "$LAST_BETA" ]; then
-              if [ -n "$MESSAGE" ]; then
-                MESSAGE+="\n"
-              fi
               MESSAGE+="测试通道更新: $LAST_BETA → $BETA_VERSION\n"
             fi
             
-            # 如果有更新就发送通知
+            echo "构建的消息:"
+            echo "$MESSAGE"
+            
+            # 8. 发送通知
             if [ -n "$MESSAGE" ]; then
-              # 发送通知（无论手动还是自动触发）
-              curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
-                -H "Content-Type: application/json" \
-                -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"$MESSAGE\"}"
+              echo "发送通知..."
               
-              echo "✅ 有更新，已发送通知"
+              # 添加调试信息
+              echo "发送的JSON:"
+              echo "{\"chat_id\": \"$CHAT_ID\", \"text\": \"$MESSAGE\"}"
+              
+              RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+                -H "Content-Type: application/json" \
+                -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"$MESSAGE\"}")
+              
+              echo "Telegram响应: $RESPONSE"
               
               # 保存新状态
               echo "$COMMIT_SHA" > "$LAST_COMMIT_FILE"
               echo "$STABLE_VERSION|$BETA_VERSION" > "$LAST_VERSION_FILE"
+              
+              echo "✅ 已发送通知"
             else
-              echo "有新提交但没有重要文件或版本更新，不发送通知"
-              # 仍然保存新状态，但不发送通知
+              echo "⚠️ 没有检测到重要更新"
               echo "$COMMIT_SHA" > "$LAST_COMMIT_FILE"
             fi
-            
           else
-            # 没有新提交
-            if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-              # 手动触发但没有更新，保持安静
-              echo "手动触发但没有更新，保持安静"
-            else
-              # 定时触发且没有更新，保持安静
-              echo "没有检测到更新，自动触发保持安静"
-            fi
+            echo "✅ 没有新提交"
           fi
+          
+          echo "=== 检查完成 ==="
