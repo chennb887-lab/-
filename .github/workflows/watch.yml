@@ -34,7 +34,7 @@ jobs:
           if [ -f "$LAST_COMMIT_FILE" ]; then
             LAST_COMMIT=$(cat "$LAST_COMMIT_FILE")
           else
-            # 第一次运行，保存状态并退出，不发送任何通知
+            # 第一次运行，保存状态并发送启动消息
             echo "$CURRENT_COMMIT" > "$LAST_COMMIT_FILE"
             
             # 获取并保存版本信息
@@ -43,12 +43,14 @@ jobs:
             BETA_VERSION=$(echo "$VERSION_CONTENT" | grep "beta_channel" | cut -d'=' -f2 | tr -d ' ' || echo "")
             echo "$STABLE_VERSION|$BETA_VERSION" > "$LAST_VERSION_FILE"
             
-            echo "第一次运行，已保存初始状态"
-            exit 0
-          fi
-          
-          # 如果没有新提交，安静退出
-          if [ "$CURRENT_COMMIT" = "$LAST_COMMIT" ]; then
+            # 发送启动消息（只在第一次运行或手动触发时）
+            START_MESSAGE="🔧 监控服务已启动\n当前稳定版本: $STABLE_VERSION\n当前测试版本: $BETA_VERSION"
+            
+            curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+              -H "Content-Type: application/json" \
+              -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"$START_MESSAGE\"}"
+            
+            echo "第一次运行，已发送启动消息"
             exit 0
           fi
           
@@ -96,19 +98,36 @@ jobs:
             MESSAGE+="测试通道更新: $CURRENT_BETA\n"
           fi
           
-          # 如果没有检测到重要更新，只更新状态不发送通知
-          if [ -z "$MESSAGE" ]; then
-            # 保存新状态但不发送通知
+          # 检查是否有新提交
+          if [ "$CURRENT_COMMIT" != "$LAST_COMMIT" ]; then
+            # 如果有更新，但MESSAGE为空（更新了其他不重要的文件），则不发送通知
+            if [ -n "$MESSAGE" ]; then
+              # 发送更新通知
+              curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+                -H "Content-Type: application/json" \
+                -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"$MESSAGE\"}"
+              
+              echo "检测到更新，已发送通知"
+            else
+              echo "有新提交但没有重要文件或版本更新，不发送通知"
+            fi
+            
+            # 保存新状态
             echo "$CURRENT_COMMIT" > "$LAST_COMMIT_FILE"
             echo "$CURRENT_STABLE|$CURRENT_BETA" > "$LAST_VERSION_FILE"
-            exit 0
+            
+          else
+            # 没有新提交
+            if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+              # 手动触发但没有更新，发送当前状态
+              STATUS_MESSAGE="📊 当前仓库状态\n稳定版本: $CURRENT_STABLE\n测试版本: $CURRENT_BETA\n\n无新更新"
+              
+              curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+                -H "Content-Type: application/json" \
+                -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"$STATUS_MESSAGE\"}"
+              
+              echo "手动触发，已发送当前状态"
+            else
+              echo "没有检测到更新，不发送通知"
+            fi
           fi
-          
-          # 发送通知
-          curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
-            -H "Content-Type: application/json" \
-            -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"$MESSAGE\"}"
-          
-          # 保存新状态
-          echo "$CURRENT_COMMIT" > "$LAST_COMMIT_FILE"
-          echo "$CURRENT_STABLE|$CURRENT_BETA" > "$LAST_VERSION_FILE"
