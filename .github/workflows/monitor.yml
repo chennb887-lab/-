@@ -19,7 +19,11 @@ jobs:
         with:
           path: |
             .github/monitor_state
-          key: monitor-state-${{ github.ref }}
+          # 核心修改：使用更唯一、不易冲突的键名
+          key: monitor-state-${{ github.ref }}-${{ github.run_id }}
+          # 设置回退键，如果精准匹配失败，会尝试用此前缀的缓存
+          restore-keys: |
+            monitor-state-${{ github.ref }}-
 
       - name: 检查仓库更新
         env:
@@ -86,38 +90,58 @@ jobs:
           if [ "$CURRENT_SHA" != "$LAST_SHA" ] && [ -n "$LAST_SHA" ]; then
             echo "🚨 发现新提交，开始分析..."
             NOTIFICATION=""
-            
-            # 检查特定文件更新
+            HAS_STABLE_SO_UPDATE=false
+            HAS_BETA_SO_UPDATE=false
+
+            # 1. 首先检查并记录 .so 文件更新
             for FILE in $FILES; do
               case "$FILE" in
                 "IllI.exe")
                   NOTIFICATION+="模拟器加载器已更新\n"
                   ;;
                 "libvampy64.so")
-                  NOTIFICATION+="直装已更新\n"
+                  HAS_STABLE_SO_UPDATE=true
+                  NOTIFICATION+="直装已更新\n"  # 稳定通道的应用文件
                   ;;
                 "libvampybeta64.so")
-                  NOTIFICATION+="测试版已更新\n"
+                  HAS_BETA_SO_UPDATE=true
+                  NOTIFICATION+="测试版已更新\n"  # 测试通道的应用文件
                   ;;
               esac
             done
-            
-            # 检查版本号变化 - 使用新格式（类型和版本分两行）
+
+            # 2. 然后检查版本号更新，并根据是否有对应.so文件更新选择格式
+            # 稳定版本检查
             if [ -n "$STABLE_VER" ] && [ -n "$OLD_STABLE" ] && [ "$STABLE_VER" != "$OLD_STABLE" ]; then
               echo "稳定版本变化: $OLD_STABLE -> $STABLE_VER"
               [ -n "$NOTIFICATION" ] && NOTIFICATION+="\n"
-              NOTIFICATION+="稳定通道更新:\n$OLD_STABLE → $STABLE_VER\n"
+              if [ "$HAS_STABLE_SO_UPDATE" = true ]; then
+                # 稳定.so文件已更新，版本通知用“稳定通道更新:”
+                NOTIFICATION+="稳定通道更新:\n$OLD_STABLE → $STABLE_VER\n"
+              else
+                # 仅ini文件里的稳定版本更新，用“稳定更新版本号:”
+                NOTIFICATION+="稳定更新版本号: $OLD_STABLE → $STABLE_VER\n"
+              fi
             fi
-            
+
+            # 测试版本检查
             if [ -n "$BETA_VER" ] && [ -n "$OLD_BETA" ] && [ "$BETA_VER" != "$OLD_BETA" ]; then
               echo "测试版本变化: $OLD_BETA -> $BETA_VER"
               [ -n "$NOTIFICATION" ] && NOTIFICATION+="\n"
-              NOTIFICATION+="测试通道更新:\n$OLD_BETA → $BETA_VER\n"
+              if [ "$HAS_BETA_SO_UPDATE" = true ]; then
+                # 测试.so文件已更新，版本通知用“测试通道更新:”
+                NOTIFICATION+="测试通道更新:\n$OLD_BETA → $BETA_VER\n"
+              else
+                # 仅ini文件里的测试版本更新，用“测试更新版本号:”
+                NOTIFICATION+="测试更新版本号: $OLD_BETA → $BETA_VER\n"
+              fi
             fi
             
             # 发送通知（如果有内容）
             if [ -n "$NOTIFICATION" ]; then
               echo "📤 发送通知..."
+              echo "通知内容预览："
+              echo "$NOTIFICATION"
               curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
                 -H "Content-Type: application/json" \
                 -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"$NOTIFICATION\"}"
