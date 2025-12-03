@@ -2,8 +2,8 @@ name: Monitor Hanikorekhar Repository
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
-  workflow_dispatch:
+    - cron: "*/5 * * * *"  # 每5分钟检查一次
+  workflow_dispatch:       # 支持手动触发
 
 jobs:
   check:
@@ -19,16 +19,14 @@ jobs:
         with:
           path: |
             .github/monitor_state
-          # 核心修改：使用更唯一、不易冲突的键名
           key: monitor-state-${{ github.ref }}-${{ github.run_id }}
-          # 设置回退键，如果精准匹配失败，会尝试用此前缀的缓存
           restore-keys: |
             monitor-state-${{ github.ref }}-
 
       - name: 检查仓库更新
         env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}  # 请确保在仓库Settings/Secrets中配置
+          CHAT_ID: ${{ secrets.CHAT_ID }}      # 请确保在仓库Settings/Secrets中配置
         run: |
           echo "=== 监控脚本开始 ==="
           
@@ -93,24 +91,24 @@ jobs:
             HAS_STABLE_SO_UPDATE=false
             HAS_BETA_SO_UPDATE=false
 
-            # 1. 首先检查并记录 .so 文件更新
+            # 【核心修改点】检查 lib/ 目录下的 .so 文件更新
             for FILE in $FILES; do
               case "$FILE" in
                 "IllI.exe")
                   NOTIFICATION+="模拟器加载器已更新\n"
                   ;;
-                "libvampy64.so")
+                "lib/libvampy64.so")        # 稳定通道文件
                   HAS_STABLE_SO_UPDATE=true
-                  NOTIFICATION+="直装已更新\n"  # 稳定通道的应用文件
+                  NOTIFICATION+="直装已更新\n"
                   ;;
-                "libvampybeta64.so")
+                "lib/libvampyb64.so")       # 测试通道文件
                   HAS_BETA_SO_UPDATE=true
-                  NOTIFICATION+="测试版已更新\n"  # 测试通道的应用文件
+                  NOTIFICATION+="测试版已更新\n"
                   ;;
               esac
             done
 
-            # 2. 然后检查版本号更新，并根据是否有对应.so文件更新选择格式
+            # 检查版本号更新，并根据是否有对应.so文件更新选择格式
             # 稳定版本检查
             if [ -n "$STABLE_VER" ] && [ -n "$OLD_STABLE" ] && [ "$STABLE_VER" != "$OLD_STABLE" ]; then
               echo "稳定版本变化: $OLD_STABLE -> $STABLE_VER"
