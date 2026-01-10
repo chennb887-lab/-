@@ -1,11 +1,9 @@
 name: 监控 Hanikorekhar 仓库更新
 
 on:
-  # 注意：GitHub Actions 的定时调度 (cron) 存在延迟，并非精确实时。
-  # 执行时间可能从几分钟到几十分钟不等，这是平台限制。
   schedule:
-    - cron: '*/5 * * * *'  # 每5分钟检查一次（实际执行时间会有波动）
-  workflow_dispatch:        # 允许手动触发
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
 
 jobs:
   check:
@@ -25,12 +23,11 @@ jobs:
 
       - name: 3. 执行核心监控
         env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}  # 需在仓库Secrets中设置
-          CHAT_ID: ${{ secrets.CHAT_ID }}      # 需在仓库Secrets中设置
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
           echo "=== 监控脚本开始 ==="
           
-          # 基础配置
           OWNER="vampycloudia"
           REPO="hanikorekhar"
           STATE_DIR=".github/monitor_state"
@@ -38,16 +35,12 @@ jobs:
           LAST_COMMIT_FILE="$STATE_DIR/last_commit.txt"
           LAST_VERSION_FILE="$STATE_DIR/last_version.txt"
           
-          # ========== 增强版：获取并解析提交SHA ==========
+          # ========== 获取最新提交SHA ==========
           echo "步骤1: 获取最新提交..."
           API_RAW_RESPONSE=$(curl -s -w "HTTP_STATUS_CODE:%{http_code}" "https://api.github.com/repos/$OWNER/$REPO/commits/main")
           HTTP_CODE=$(echo "$API_RAW_RESPONSE" | sed -n 's/.*HTTP_STATUS_CODE:\([0-9]*\)$/\1/p')
           RESPONSE_BODY=$(echo "$API_RAW_RESPONSE" | sed 's/HTTP_STATUS_CODE:[0-9]*$//')
           
-          # 调试信息（正式运行时若稳定可注释掉）
-          echo "  调试: HTTP状态码=[$HTTP_CODE], 响应长度=$(echo -n "$RESPONSE_BODY" | wc -c)字节"
-          
-          # 关键检查：响应是否以 '{' 开头
           FIRST_CHAR=$(echo -n "$RESPONSE_BODY" | head -c 1)
           if [ "$FIRST_CHAR" != "{" ]; then
               echo "❌ 错误：API响应不是有效JSON。可能是网络问题，请稍后重试。"
@@ -61,23 +54,22 @@ jobs:
               exit 1
           fi
           echo "  当前提交SHA: $CURRENT_SHA"
-          # ========== 增强版结束 ==========
           
-          # 获取提交详情以识别更新的文件
+          # ========== 获取更新文件列表 ==========
           echo "步骤2: 获取更新的文件列表..."
           COMMIT_DETAIL=$(curl -s "https://api.github.com/repos/$OWNER/$REPO/commits/$CURRENT_SHA")
           FILES=$(echo "$COMMIT_DETAIL" | jq -r '.files[].filename // empty' 2>/dev/null | tr '\n' ' ')
           echo "  涉及文件: $FILES"
           
-          # 解析版本文件
+          # ========== 解析版本信息 ==========
           echo "步骤3: 解析版本信息..."
           VERSION_URL="https://raw.githubusercontent.com/$OWNER/$REPO/main/SrcVersion.ini"
           VERSION_CONTENT=$(curl -s "$VERSION_URL" || echo "")
           STABLE_VER=$(echo "$VERSION_CONTENT" | grep "Release_channel" | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-          BETA_VER=$(echo "$VERSION_CONTENT"   | grep "Dev_channel"   | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+          BETA_VER=$(echo "$VERSION_CONTENT" | grep "Dev_channel" | cut -d'=' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
           echo "  稳定版: $STABLE_VER, 测试版: $BETA_VER"
           
-          # 初始化状态文件（首次运行）
+          # ========== 初始化状态文件 ==========
           if [ ! -f "$LAST_COMMIT_FILE" ] || [ ! -f "$LAST_VERSION_FILE" ]; then
               echo "步骤4: 首次运行，初始化状态..."
               echo "$CURRENT_SHA" > "$LAST_COMMIT_FILE"
@@ -90,58 +82,81 @@ jobs:
               exit 0
           fi
           
-          # 读取上次状态
+          # ========== 读取上次状态 ==========
           LAST_SHA=$(cat "$LAST_COMMIT_FILE" 2>/dev/null || echo "")
           LAST_VER_DATA=$(cat "$LAST_VERSION_FILE" 2>/dev/null || echo "|")
           OLD_STABLE=$(echo "$LAST_VER_DATA" | cut -d'|' -f1)
           OLD_BETA=$(echo "$LAST_VER_DATA" | cut -d'|' -f2)
           echo "步骤4: 比对状态 (上次提交: $LAST_SHA)"
           
-          # 检测新提交
+          # ========== 核心：检测是否有相关更新 ==========
           if [ "$CURRENT_SHA" != "$LAST_SHA" ] && [ -n "$LAST_SHA" ]; then
               echo "🚨 发现新提交，分析更新..."
+              
               NOTIFICATION=""
               HAS_STABLE_SO_UPDATE=false
               HAS_BETA_SO_UPDATE=false
+              VERSION_CHANGED=false
               
-              # 检查文件更新 (注意：文件现在位于 lib/ 目录下)
+              # 检查是否有监控的文件更新
               for FILE in $FILES; do
                   case "$FILE" in
                       "IllI.exe")
-                          NOTIFICATION+="模拟器加载器已更新\n"
+                          HAS_STABLE_SO_UPDATE=true  # 视为稳定通道更新
                           ;;
-                      "lib/libvampy64.so")   # 稳定通道
+                      "lib/libvampy64.so")
                           HAS_STABLE_SO_UPDATE=true
-                          NOTIFICATION+="直装已更新\n"
                           ;;
-                      "lib/libvampyb64.so")  # 测试通道
+                      "lib/libvampyb64.so")
                           HAS_BETA_SO_UPDATE=true
-                          NOTIFICATION+="测试版已更新\n"
                           ;;
                   esac
               done
               
-              # 检查版本号更新
+              # 检查版本号是否有变化
               if [ -n "$STABLE_VER" ] && [ -n "$OLD_STABLE" ] && [ "$STABLE_VER" != "$OLD_STABLE" ]; then
-                  [ -n "$NOTIFICATION" ] && NOTIFICATION+="\n"
-                  if [ "$HAS_STABLE_SO_UPDATE" = true ]; then
-                      NOTIFICATION+="稳定通道更新:\n$OLD_STABLE → $STABLE_VER\n"
-                  else
-                      NOTIFICATION+="稳定更新版本号: $OLD_STABLE → $STABLE_VER\n"
-                  fi
+                  VERSION_CHANGED=true
               fi
-              
               if [ -n "$BETA_VER" ] && [ -n "$OLD_BETA" ] && [ "$BETA_VER" != "$OLD_BETA" ]; then
-                  [ -n "$NOTIFICATION" ] && NOTIFICATION+="\n"
-                  if [ "$HAS_BETA_SO_UPDATE" = true ]; then
-                      NOTIFICATION+="测试通道更新:\n$OLD_BETA → $BETA_VER\n"
-                  else
-                      NOTIFICATION+="测试更新版本号: $OLD_BETA → $BETA_VER\n"
-                  fi
+                  VERSION_CHANGED=true
               fi
               
-              # 发送通知
-              if [ -n "$NOTIFICATION" ]; then
+              # 关键判断：只有监控的文件或版本号有变化才通知
+              if [ "$HAS_STABLE_SO_UPDATE" = true ] || [ "$HAS_BETA_SO_UPDATE" = true ] || [ "$VERSION_CHANGED" = true ]; then
+                  
+                  # 构建文件更新消息
+                  if [ "$HAS_STABLE_SO_UPDATE" = true ]; then
+                      NOTIFICATION+="直装已更新\n"
+                  fi
+                  if [ "$HAS_BETA_SO_UPDATE" = true ]; then
+                      NOTIFICATION+="测试版已更新\n"
+                  fi
+                  
+                  # 添加版本更新消息
+                  if [ -n "$NOTIFICATION" ]; then
+                      NOTIFICATION+="\n"
+                  fi
+                  
+                  if [ -n "$STABLE_VER" ] && [ -n "$OLD_STABLE" ] && [ "$STABLE_VER" != "$OLD_STABLE" ]; then
+                      if [ "$HAS_STABLE_SO_UPDATE" = true ]; then
+                          NOTIFICATION+="稳定通道更新:\n$OLD_STABLE → $STABLE_VER\n"
+                      else
+                          NOTIFICATION+="稳定更新版本号: $OLD_STABLE → $STABLE_VER\n"
+                      fi
+                  fi
+                  
+                  if [ -n "$BETA_VER" ] && [ -n "$OLD_BETA" ] && [ "$BETA_VER" != "$OLD_BETA" ]; then
+                      if [ "$NOTIFICATION" ]; then
+                          NOTIFICATION+="\n"
+                      fi
+                      if [ "$HAS_BETA_SO_UPDATE" = true ]; then
+                          NOTIFICATION+="测试通道更新:\n$OLD_BETA → $BETA_VER\n"
+                      else
+                          NOTIFICATION+="测试更新版本号: $OLD_BETA → $BETA_VER\n"
+                      fi
+                  fi
+                  
+                  # 发送通知
                   echo "📤 发送通知..."
                   echo "--- 通知内容 ---"
                   echo -e "$NOTIFICATION"
@@ -150,13 +165,14 @@ jobs:
                     -H "Content-Type: application/json" \
                     -d "{\"chat_id\": \"$CHAT_ID\", \"text\": \"$NOTIFICATION\"}"
               else
-                  echo "ℹ️  新提交未包含监控目标，本次静默。"
+                  echo "ℹ️  新提交未包含任何监控文件或版本号更新，本次完全静默。"
               fi
               
-              # 更新状态文件
+              # 更新状态文件（无论是否通知）
               echo "$CURRENT_SHA" > "$LAST_COMMIT_FILE"
               echo "$STABLE_VER|$BETA_VER" > "$LAST_VERSION_FILE"
               echo "✅ 状态已更新。"
+              
           else
               echo "✅ 已是最新状态，无新提交。"
           fi
