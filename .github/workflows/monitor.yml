@@ -84,7 +84,7 @@ jobs:
           echo "上次稳定: '$OLD_STABLE'"
           echo "上次测试: '$OLD_BETA'"
           
-          # ========== 【核心修复与调试块 - 已修正语法】 ==========
+          # ========== 【核心修复与调试块】 ==========
           echo ">>> 开始执行误报修复逻辑 <<<"
           
           # 1. 自动修正旧版本记录中的明显错误
@@ -102,8 +102,7 @@ jobs:
           if [[ -z "$STABLE_VER" || -z "$BETA_VER" ]]; then
               echo "⚠️  警告：解析出的新版本号为空，跳过版本比对以防止误报。"
               SKIP_VERSION_CHECK=true
-          elif echo "$STABLE_VER
-$BETA_VER" | grep -q "→"; then
+          elif echo "$STABLE_VER"$'\n'"$BETA_VER" | grep -q "→"; then
               echo "⚠️  警告：解析出的版本号包含通知符号 '→'，文件可能被意外修改，跳过比对。"
               SKIP_VERSION_CHECK=true
           fi
@@ -190,6 +189,16 @@ $BETA_VER" | grep -q "→"; then
             echo "$CURRENT_SHA" > "$LAST_COMMIT_FILE"
             if [ "$SKIP_VERSION_CHECK" = false ]; then
                 echo "$STABLE_VER|$BETA_VER" > "$LAST_VERSION_FILE"
+                echo "状态（提交及版本）已更新。"
+            else
+                echo "状态（仅提交）已更新，版本记录因无效而保持原样。"
+            fi
+            
+          else
+            echo "✅ 已是最新状态，无新提交。"
+          fi
+          
+          echo "=== 监控脚本结束 ==="
                 echo "状态（提交及版本）已更新。"
             else
                 echo "状态（仅提交）已更新，版本记录因无效而保持原样。"
