@@ -126,14 +126,14 @@ jobs:
 
             for FILE in $FILES; do
               case "$FILE" in
-                "IllI.exe")
+                "client/IllI.exe")
                   NOTIFICATION+="模拟器加载器已更新\n"
                   ;;
-                "lib/libvampy64.so")
+                "lib/4.2/libvampy64.so")
                   HAS_STABLE_SO_UPDATE=true
                   NOTIFICATION+="直装已更新\n"
                   ;;
-                "lib/libvampyb64.so")
+                "lib/4.2/libvampyb64.so")
                   HAS_BETA_SO_UPDATE=true
                   NOTIFICATION+="测试版已更新\n"
                   ;;
