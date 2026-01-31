@@ -30,8 +30,8 @@ jobs:
         run: |
           echo "=== 监控脚本开始 ==="
           
-          OWNER="vampycloudia"
-          REPO="hanikorekhar"
+          OWNER="pvtvampy"
+          REPO="pantry-core"
           STATE_DIR=".github/monitor_state"
           LAST_COMMIT_FILE="$STATE_DIR/last_commit.txt"
           LAST_VERSION_FILE="$STATE_DIR/last_version.txt"
